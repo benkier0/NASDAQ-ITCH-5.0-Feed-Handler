@@ -2,14 +2,6 @@
 #include <cstdint>
 #include <cstddef>
 
-// MoldUDP64 framing (NASDAQ's UDP transport layer for ITCH).
-//
-// Packet layout:
-//   Session[10]  Sequence[8 BE]  MsgCount[2 BE]
-//   for each message: Length[2 BE]  Data[n]
-//
-// MsgCount 0xFFFF = heartbeat, 0 = end-of-session.
-
 namespace net {
 
 #pragma pack(push, 1)

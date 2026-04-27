@@ -3,9 +3,6 @@
 #include <array>
 #include <cstddef>
 
-// SPSC lock-free ring buffer. Head and tail are on separate cache lines to
-// avoid false sharing between producer and consumer threads.
-
 namespace util {
 
 template<typename T, std::size_t Capacity>

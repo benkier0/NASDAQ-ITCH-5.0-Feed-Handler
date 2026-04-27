@@ -7,9 +7,6 @@
 #include <cmath>
 #include <time.h>
 
-// Power-of-two latency histogram. Bucket k accumulates samples in [2^k, 2^(k+1)).
-// Single-writer safe with relaxed atomics; reader uses acquire loads.
-
 namespace util {
 
 class LatencyHistogram {

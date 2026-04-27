@@ -1,0 +1,14 @@
+=== no affinity ===
+Generated 2000000 msgs: adds=675400 cancels=441426 executes=442080 replaces=441094
+Warmup: 200000 msgs processed
+
+---- Benchmark Results ----
+Messages    : 2000000
+Wall time   : 148.645 ms
+Throughput  : 13.45 M msgs/sec
+[per-msg] n=31250  mean=69.0 ns  p50=96 ns  p95=96 ns  p99=96 ns  p999=384 ns  min=46 ns  max=1059 ns
+Book msgs   : 2000000
+Shares remaining: 512
+
+platform: macOS / Apple Silicon (no SCHED_FIFO, no core isolation, no hugepages)
+command:  ./build/bench --msgs 2000000 --warmup 200000

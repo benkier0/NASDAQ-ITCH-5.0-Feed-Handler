@@ -39,4 +39,7 @@ target_link_libraries(feed_handler PRIVATE Threads::Threads)
 add_executable(bench bench/bench_main.cpp)
 target_link_libraries(bench PRIVATE orderbook Threads::Threads)
 
-install(TARGETS feed_handler bench RUNTIME DESTINATION bin)
+add_executable(validate_book tests/validate_book.cpp)
+target_link_libraries(validate_book PRIVATE orderbook Threads::Threads)
+
+install(TARGETS feed_handler bench validate_book RUNTIME DESTINATION bin)

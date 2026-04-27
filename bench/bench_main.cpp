@@ -67,14 +67,14 @@ struct BenchHandler {
     book::OrderBook        book;
     util::LatencyHistogram hist;
 
-    void on_add_order(const itch::AddOrder& m)                               noexcept { book.on_add_order(m); }
-    void on_add_order_mpid(const itch::AddOrderMPID& m)                      noexcept { book.on_add_order_mpid(m); }
-    void on_order_executed(const itch::OrderExecuted& m)                     noexcept { book.on_order_executed(m); }
+    void on_add_order(const itch::AddOrder& m) noexcept { book.on_add_order(m); }
+    void on_add_order_mpid(const itch::AddOrderMPID& m) noexcept { book.on_add_order_mpid(m); }
+    void on_order_executed(const itch::OrderExecuted& m) noexcept { book.on_order_executed(m); }
     void on_order_executed_with_price(const itch::OrderExecutedWithPrice& m) noexcept { book.on_order_executed_with_price(m); }
-    void on_order_cancel(const itch::OrderCancel& m)                         noexcept { book.on_order_cancel(m); }
-    void on_order_delete(const itch::OrderDelete& m)                         noexcept { book.on_order_delete(m); }
-    void on_order_replace(const itch::OrderReplace& m)                       noexcept { book.on_order_replace(m); }
-    void on_system_event(const itch::SystemEvent& m)                         noexcept { book.on_system_event(m); }
+    void on_order_cancel(const itch::OrderCancel& m) noexcept { book.on_order_cancel(m); }
+    void on_order_delete(const itch::OrderDelete& m) noexcept { book.on_order_delete(m); }
+    void on_order_replace(const itch::OrderReplace& m) noexcept { book.on_order_replace(m); }
+    void on_system_event(const itch::SystemEvent& m) noexcept { book.on_system_event(m); }
 };
 
 static std::vector<Packet> generate_sequence(uint64_t total_msgs, uint64_t seed) {
@@ -176,16 +176,30 @@ int main(int argc, char* argv[]) {
     }
 
     BenchHandler handler;
-    util::LatencyHistogram per_msg_hist;
+
     const auto wall_start = std::chrono::steady_clock::now();
-
-    for (const auto& pkt : pkts) {
-        const uint64_t t0 = util::ScopedTimer::now_ns();
+    for (const auto& pkt : pkts)
         (void)itch::dispatch(pkt.buf, pkt.len, handler);
-        per_msg_hist.record(util::ScopedTimer::now_ns() - t0);
-    }
-
     const auto wall_end = std::chrono::steady_clock::now();
+
+    util::LatencyHistogram per_msg_hist;
+    {
+        BenchHandler lat_handler;
+        // Warm the lat_handler's book with the first warmup_msgs
+        const uint64_t wn = std::min(warmup_msgs, static_cast<uint64_t>(pkts.size()));
+        for (uint64_t i = 0; i < wn; ++i)
+            (void)itch::dispatch(pkts[i].buf, pkts[i].len, lat_handler);
+
+        constexpr uint64_t BATCH = 64;
+        const uint64_t n = static_cast<uint64_t>(pkts.size());
+        for (uint64_t i = 0; i + BATCH <= n; i += BATCH) {
+            const uint64_t t0 = util::ScopedTimer::now_ns();
+            for (uint64_t j = i; j < i + BATCH; ++j)
+                (void)itch::dispatch(pkts[j].buf, pkts[j].len, lat_handler);
+            const uint64_t elapsed = util::ScopedTimer::now_ns() - t0;
+            per_msg_hist.record(elapsed / BATCH);
+        }
+    }
     const double wall_ns = static_cast<double>(
         std::chrono::duration_cast<std::chrono::nanoseconds>(
             wall_end - wall_start).count());

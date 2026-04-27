@@ -17,14 +17,14 @@ struct FeedHandler {
     book::OrderBook        book;
     util::LatencyHistogram hist;
 
-    void on_add_order(const itch::AddOrder& m)                               noexcept { book.on_add_order(m); }
-    void on_add_order_mpid(const itch::AddOrderMPID& m)                      noexcept { book.on_add_order_mpid(m); }
-    void on_order_executed(const itch::OrderExecuted& m)                     noexcept { book.on_order_executed(m); }
+    void on_add_order(const itch::AddOrder& m) noexcept { book.on_add_order(m); }
+    void on_add_order_mpid(const itch::AddOrderMPID& m) noexcept { book.on_add_order_mpid(m); }
+    void on_order_executed(const itch::OrderExecuted& m) noexcept { book.on_order_executed(m); }
     void on_order_executed_with_price(const itch::OrderExecutedWithPrice& m) noexcept { book.on_order_executed_with_price(m); }
-    void on_order_cancel(const itch::OrderCancel& m)                         noexcept { book.on_order_cancel(m); }
-    void on_order_delete(const itch::OrderDelete& m)                         noexcept { book.on_order_delete(m); }
-    void on_order_replace(const itch::OrderReplace& m)                       noexcept { book.on_order_replace(m); }
-    void on_system_event(const itch::SystemEvent& m)                         noexcept { book.on_system_event(m); }
+    void on_order_cancel(const itch::OrderCancel& m) noexcept { book.on_order_cancel(m); }
+    void on_order_delete(const itch::OrderDelete& m) noexcept { book.on_order_delete(m); }
+    void on_order_replace(const itch::OrderReplace& m) noexcept { book.on_order_replace(m); }
+    void on_system_event(const itch::SystemEvent& m) noexcept { book.on_system_event(m); }
 };
 
 static std::atomic<bool> g_running{true};
@@ -33,7 +33,7 @@ static void on_signal(int) { g_running.store(false, std::memory_order_relaxed); 
 
 static void print_usage(const char* prog) {
     std::fprintf(stderr,
-        "Usage: %s -g <mcast-group> -p <port> [-i <local-ip>] [-c <core>]\n",
+        "Usage: %s -g <mcast-group> -p <port> [-i <iface-or-ip>] [-c <core>]\n",
         prog);
 }
 
@@ -66,7 +66,9 @@ int main(int argc, char* argv[]) {
 
     FeedHandler handler;
     alignas(64) uint8_t pkt[65536];
-    uint64_t pkt_count = 0;
+    uint64_t pkt_count   = 0;
+    uint64_t gap_count   = 0;
+    uint64_t expected_seq = 0;
 
     while (g_running.load(std::memory_order_relaxed)) {
         const ssize_t n = ::recvfrom(sock, pkt, sizeof(pkt), 0, nullptr, nullptr);
@@ -75,15 +77,22 @@ int main(int argc, char* argv[]) {
         const uint64_t t0 = util::ScopedTimer::now_ns();
 
         net::demux(pkt, static_cast<std::size_t>(n),
-            [&](const uint8_t* buf, uint16_t len, uint64_t /*seq*/) {
+            [&](const uint8_t* buf, uint16_t len, uint64_t seq) {
+                if (expected_seq != 0 && seq != expected_seq) {
+                    ++gap_count;
+                    std::fprintf(stderr,
+                        "seq gap: expected %" PRIu64 " got %" PRIu64 " (lost %" PRIu64 ")\n",
+                        expected_seq, seq, seq - expected_seq);
+                }
+                expected_seq = seq + 1;
                 (void)itch::dispatch(buf, len, handler);
             });
 
         handler.hist.record(util::ScopedTimer::now_ns() - t0);
 
         if (++pkt_count % 1'000'000 == 0) {
-            std::printf("pkt=%" PRIu64 "  msgs=%" PRIu64 "\n",
-                pkt_count, handler.book.msgs_processed());
+            std::printf("pkt=%" PRIu64 "  msgs=%" PRIu64 "  gaps=%" PRIu64 "\n",
+                pkt_count, handler.book.msgs_processed(), gap_count);
             handler.hist.print_report("pkt-latency");
         }
     }

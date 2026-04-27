@@ -4,10 +4,6 @@
 #include <cassert>
 #include <new>
 
-// Pre-allocated slab pool. Objects live in a contiguous array; the free list
-// intrudes into unused slots so there is no heap allocation on the hot path.
-// Not thread-safe — intended for single-threaded use on the receive core.
-
 namespace memory {
 
 template<typename T, std::size_t Capacity>

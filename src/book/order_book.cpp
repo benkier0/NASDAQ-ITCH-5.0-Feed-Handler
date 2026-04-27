@@ -5,82 +5,63 @@
 namespace book {
 
 OrderBook::OrderBook() {
-    for (auto& bk : books_)
-        bk.orders.reserve(4096);
-    ref_to_locate_.reserve(1 << 20);
+    orders_.reserve(1 << 20);
 }
 
 void OrderBook::add_order(uint16_t locate, uint64_t ref,
                           char side, uint32_t shares, uint32_t price) noexcept {
+    orders_.emplace(ref, Order{ref, price, shares, locate, side});
     auto& bk = books_[locate];
-    bk.orders.emplace(ref, Order{ref, price, shares, locate, side});
-    ref_to_locate_.emplace(ref, locate);
-
-    if (side == 'B') {
-        auto& level = bk.bids[price];
-        level.total_shares += shares;
-        ++level.order_count;
-    } else {
-        auto& level = bk.asks[price];
-        level.total_shares += shares;
-        ++level.order_count;
-    }
+    auto& level_map = (side == 'B') ? bk.bids : bk.asks;
+    auto& level = level_map[price];
+    level.total_shares += shares;
+    ++level.order_count;
 }
 
 void OrderBook::reduce_order(uint64_t ref, uint32_t shares) noexcept {
-    auto loc_it = ref_to_locate_.find(ref);
-    if (__builtin_expect(loc_it == ref_to_locate_.end(), 0)) return;
+    auto it = orders_.find(ref);
+    if (__builtin_expect(it == orders_.end(), 0)) return;
 
-    auto& bk = books_[loc_it->second];
-    auto ord_it = bk.orders.find(ref);
-    if (__builtin_expect(ord_it == bk.orders.end(), 0)) return;
-
-    Order& ord = ord_it->second;
+    Order& ord = it->second;
     const uint32_t remove = (shares > ord.shares) ? ord.shares : shares;
     ord.shares -= remove;
 
+    auto& bk = books_[ord.stock_locate];
     auto reduce_level = [&](auto& level_map) {
-        auto it = level_map.find(ord.price);
-        if (it == level_map.end()) return;
-        it->second.total_shares -= remove;
+        auto lvl_it = level_map.find(ord.price);
+        if (lvl_it == level_map.end()) return;
+        lvl_it->second.total_shares -= remove;
         if (ord.shares == 0) {
-            --it->second.order_count;
-            if (it->second.order_count == 0) level_map.erase(it);
+            --lvl_it->second.order_count;
+            if (lvl_it->second.order_count == 0) level_map.erase(lvl_it);
         }
     };
 
     if (ord.side == 'B') reduce_level(bk.bids);
     else                  reduce_level(bk.asks);
 
-    if (ord.shares == 0) {
-        bk.orders.erase(ord_it);
-        ref_to_locate_.erase(loc_it);
-    }
+    if (ord.shares == 0) orders_.erase(it);
 }
 
 void OrderBook::delete_order(uint64_t ref) noexcept {
-    auto loc_it = ref_to_locate_.find(ref);
-    if (__builtin_expect(loc_it == ref_to_locate_.end(), 0)) return;
+    auto it = orders_.find(ref);
+    if (__builtin_expect(it == orders_.end(), 0)) return;
 
-    auto& bk = books_[loc_it->second];
-    auto ord_it = bk.orders.find(ref);
-    if (__builtin_expect(ord_it == bk.orders.end(), 0)) return;
-
-    const Order& ord = ord_it->second;
+    const Order& ord = it->second;
+    auto& bk = books_[ord.stock_locate];
 
     auto remove_from = [&](auto& level_map) {
-        auto it = level_map.find(ord.price);
-        if (it == level_map.end()) return;
-        it->second.total_shares -= ord.shares;
-        --it->second.order_count;
-        if (it->second.order_count == 0) level_map.erase(it);
+        auto lvl_it = level_map.find(ord.price);
+        if (lvl_it == level_map.end()) return;
+        lvl_it->second.total_shares -= ord.shares;
+        --lvl_it->second.order_count;
+        if (lvl_it->second.order_count == 0) level_map.erase(lvl_it);
     };
 
     if (ord.side == 'B') remove_from(bk.bids);
     else                  remove_from(bk.asks);
 
-    bk.orders.erase(ord_it);
-    ref_to_locate_.erase(loc_it);
+    orders_.erase(it);
 }
 
 void OrderBook::on_add_order(const itch::AddOrder& msg) noexcept {
@@ -128,15 +109,10 @@ void OrderBook::on_order_replace(const itch::OrderReplace& msg) noexcept {
     const uint32_t shares   = itch::be32(msg.shares);
     const uint32_t price    = itch::be32(msg.price);
 
-    auto loc_it = ref_to_locate_.find(orig_ref);
-    if (__builtin_expect(loc_it == ref_to_locate_.end(), 0)) return;
-    const uint16_t locate = loc_it->second;
-
-    auto& bk = books_[locate];
-    auto ord_it = bk.orders.find(orig_ref);
-    if (__builtin_expect(ord_it == bk.orders.end(), 0)) return;
-
-    const char side = ord_it->second.side;
+    auto it = orders_.find(orig_ref);
+    if (__builtin_expect(it == orders_.end(), 0)) return;
+    const uint16_t locate = it->second.stock_locate;
+    const char side       = it->second.side;
     delete_order(orig_ref);
     add_order(locate, new_ref, side, shares, price);
 }

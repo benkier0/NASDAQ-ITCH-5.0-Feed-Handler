@@ -3,9 +3,6 @@
 #include <cstdint>
 #include <cstddef>
 
-// Zero-copy dispatcher: cast buf directly to the appropriate packed struct
-// and forward to the handler. Fields are still big-endian on entry.
-
 namespace itch {
 
 template<typename Handler>

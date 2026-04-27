@@ -7,6 +7,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <ifaddrs.h>
 #include <unistd.h>
 #ifdef __linux__
 #include <net/if.h>
@@ -50,9 +51,23 @@ int open_multicast_socket(const MulticastConfig& cfg) {
         throw_errno("inet_pton(group)");
     if (cfg.interface_ip == "0.0.0.0" || cfg.interface_ip.empty()) {
         mreq.imr_interface.s_addr = htonl(INADDR_ANY);
-    } else {
-        if (::inet_pton(AF_INET, cfg.interface_ip.c_str(), &mreq.imr_interface) != 1)
-            throw_errno("inet_pton(interface)");
+    } else if (::inet_pton(AF_INET, cfg.interface_ip.c_str(), &mreq.imr_interface) != 1) {
+        // Not a dotted-decimal IP — treat as interface name and resolve via getifaddrs
+        struct ifaddrs* ifap = nullptr;
+        if (::getifaddrs(&ifap) < 0) throw_errno("getifaddrs");
+        bool found = false;
+        for (struct ifaddrs* ifa = ifap; ifa; ifa = ifa->ifa_next) {
+            if (!ifa->ifa_addr || ifa->ifa_addr->sa_family != AF_INET) continue;
+            if (cfg.interface_ip == ifa->ifa_name) {
+                mreq.imr_interface =
+                    reinterpret_cast<struct sockaddr_in*>(ifa->ifa_addr)->sin_addr;
+                found = true;
+                break;
+            }
+        }
+        ::freeifaddrs(ifap);
+        if (!found)
+            throw std::runtime_error("interface not found: " + cfg.interface_ip);
     }
     if (::setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)) < 0)
         throw_errno("IP_ADD_MEMBERSHIP");

@@ -33,7 +33,7 @@ static void on_signal(int) { g_running.store(false, std::memory_order_relaxed); 
 
 static void print_usage(const char* prog) {
     std::fprintf(stderr,
-        "Usage: %s -g <mcast-group> -p <port> [-i <local-ip>] [-c <core>]\n",
+        "Usage: %s -g <mcast-group> -p <port> [-i <iface-or-ip>] [-c <core>]\n",
         prog);
 }
 

@@ -176,16 +176,34 @@ int main(int argc, char* argv[]) {
     }
 
     BenchHandler handler;
-    util::LatencyHistogram per_msg_hist;
+
+    // --- Throughput pass: no per-message timing on the hot path ---
     const auto wall_start = std::chrono::steady_clock::now();
-
-    for (const auto& pkt : pkts) {
-        const uint64_t t0 = util::ScopedTimer::now_ns();
+    for (const auto& pkt : pkts)
         (void)itch::dispatch(pkt.buf, pkt.len, handler);
-        per_msg_hist.record(util::ScopedTimer::now_ns() - t0);
-    }
-
     const auto wall_end = std::chrono::steady_clock::now();
+
+    // --- Latency sampling pass: batch-time groups of 64 messages ---
+    // Processes the same sequence on a fresh (but warmed) handler so the
+    // book state is consistent; divide batch wall time by batch size.
+    util::LatencyHistogram per_msg_hist;
+    {
+        BenchHandler lat_handler;
+        // Warm the lat_handler's book with the first warmup_msgs
+        const uint64_t wn = std::min(warmup_msgs, static_cast<uint64_t>(pkts.size()));
+        for (uint64_t i = 0; i < wn; ++i)
+            (void)itch::dispatch(pkts[i].buf, pkts[i].len, lat_handler);
+
+        constexpr uint64_t BATCH = 64;
+        const uint64_t n = static_cast<uint64_t>(pkts.size());
+        for (uint64_t i = 0; i + BATCH <= n; i += BATCH) {
+            const uint64_t t0 = util::ScopedTimer::now_ns();
+            for (uint64_t j = i; j < i + BATCH; ++j)
+                (void)itch::dispatch(pkts[j].buf, pkts[j].len, lat_handler);
+            const uint64_t elapsed = util::ScopedTimer::now_ns() - t0;
+            per_msg_hist.record(elapsed / BATCH);
+        }
+    }
     const double wall_ns = static_cast<double>(
         std::chrono::duration_cast<std::chrono::nanoseconds>(
             wall_end - wall_start).count());

@@ -2,10 +2,9 @@
 #include "order.hpp"
 #include "../itch/messages.hpp"
 #include <cstdint>
-#include <map>
 #include <unordered_map>
-#include <functional>
 #include <array>
+#include <limits>
 
 // L2 order book: aggregates resting shares by price level per stock.
 // All on_* methods decode big-endian fields on entry.
@@ -20,22 +19,26 @@ struct PriceLevel {
     uint32_t order_count{0};
 };
 
-// Per-stock book: descending bids, ascending asks.
+// Per-stock book: flat hash maps for O(1) level lookup on the hot path.
+// best_bid/best_ask do a linear scan — they are not called on the receive path.
 struct L2Book {
-    std::map<uint32_t, PriceLevel, std::greater<uint32_t>> bids;
-    std::map<uint32_t, PriceLevel>                         asks;
-    std::unordered_map<uint64_t, Order>                    orders;  // ref -> Order
+    std::unordered_map<uint32_t, PriceLevel> bids;
+    std::unordered_map<uint32_t, PriceLevel> asks;
 
     [[nodiscard]] bool empty() const noexcept {
         return bids.empty() && asks.empty();
     }
 
-    // Best bid/ask prices (0 if side is empty)
+    // Best bid/ask prices (0 if side is empty). Linear scan — not on hot path.
     [[nodiscard]] uint32_t best_bid() const noexcept {
-        return bids.empty() ? 0u : bids.begin()->first;
+        uint32_t best = 0;
+        for (const auto& [px, lvl] : bids) if (px > best) best = px;
+        return best;
     }
     [[nodiscard]] uint32_t best_ask() const noexcept {
-        return asks.empty() ? 0u : asks.begin()->first;
+        uint32_t best = std::numeric_limits<uint32_t>::max();
+        for (const auto& [px, lvl] : asks) if (px < best) best = px;
+        return best == std::numeric_limits<uint32_t>::max() ? 0u : best;
     }
 };
 
@@ -66,7 +69,7 @@ private:
     void delete_order(uint64_t ref) noexcept;
 
     std::array<L2Book, MAX_STOCKS> books_;
-    std::unordered_map<uint64_t, uint16_t> ref_to_locate_;  // global ref → locate
+    std::unordered_map<uint64_t, Order> orders_;  // single global ref → Order (eliminates double lookup)
     uint64_t msgs_processed_{0};
 };
 

@@ -4,3 +4,5 @@ build/
 *.d
 compile_commands.json
 .cache/
+
+.claude/
